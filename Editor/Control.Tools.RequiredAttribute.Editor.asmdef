@@ -1,0 +1,18 @@
+{
+    "name": "Control.Tools.RequiredAttribute.Editor",
+    "rootNamespace": "Control.Tools.Required.Editor",
+    "references": [
+        "Control.Tools.RequiredAttribute.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

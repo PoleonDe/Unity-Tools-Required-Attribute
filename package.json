@@ -1,0 +1,26 @@
+{
+  "name": "com.control-tools.required-attribute",
+  "version": "0.1.0",
+  "displayName": "Control Tools - Required Attribute",
+  "description": "Extended required field validation tools for Unity.",
+  "unity": "6000.0",
+  "author": {
+    "name": "Control Tools"
+  },
+  "keywords": [
+    "unity",
+    "tools",
+    "editor",
+    "inspector",
+    "validation",
+    "required",
+    "control-tools"
+  ],
+  "samples": [
+    {
+      "displayName": "Basic Usage",
+      "description": "Basic example setup showing required field validation.",
+      "path": "Samples~/Basic Usage"
+    }
+  ]
+}
