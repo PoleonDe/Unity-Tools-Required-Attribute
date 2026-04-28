@@ -4,8 +4,20 @@
   "displayName": "Control Tools - Required Attribute",
   "description": "Extended required field validation tools for Unity.",
   "unity": "6000.0",
+  "license": "MIT",
   "author": {
-    "name": "Control Tools"
+    "name": "PoleonDe",
+    "url": "https://github.com/PoleonDe"
+  },
+  "documentationUrl": "https://github.com/PoleonDe/Unity-Tools-Required-Attribute#readme",
+  "changelogUrl": "https://github.com/PoleonDe/Unity-Tools-Required-Attribute/blob/main/CHANGELOG.md",
+  "licensesUrl": "https://github.com/PoleonDe/Unity-Tools-Required-Attribute/blob/main/LICENSE.md",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PoleonDe/Unity-Tools-Required-Attribute.git"
+  },
+  "bugs": {
+    "url": "https://github.com/PoleonDe/Unity-Tools-Required-Attribute/issues"
   },
   "keywords": [
     "unity",

@@ -8,17 +8,25 @@ Unity 6 / 6000.0 or newer.
 
 ## Installation
 
-Install from a Git URL:
+Install the package directly from GitHub with Unity Package Manager:
+
+1. Open `Window > Package Manager` in Unity.
+2. Select `+ > Install package from git URL...`.
+3. Enter this URL:
 
 ```text
-https://github.com/OWNER/com.control-tools.required-attribute.git#0.1.0
+https://github.com/PoleonDe/Unity-Tools-Required-Attribute.git
 ```
 
-Install from a local file path during development:
+You can also add the package to `Packages/manifest.json`:
 
 ```json
-"com.control-tools.required-attribute": "file:../../com.control-tools.required-attribute"
+"com.control-tools.required-attribute": "https://github.com/PoleonDe/Unity-Tools-Required-Attribute.git"
 ```
+
+To install a specific version later, create and push a Git tag, then append it to the URL, for example `#0.1.0`.
+
+The Widget can be created by right clicking next to the play/pause widget in the top bar, and then selecting : "Control/GlobalMissingRequired".
 
 ## Basic Usage
 
@@ -33,6 +41,8 @@ public sealed class RequiredExample : MonoBehaviour
 }
 ```
 
+
+
 ## Folder Structure
 
 - `Runtime/`: the runtime `RequiredAttribute` API.
@@ -45,6 +55,7 @@ public sealed class RequiredExample : MonoBehaviour
 
 - Validation runs in the Unity Editor only.
 - The optional message constructor is stored on the attribute but is not currently displayed in the editor UI.
+- Git URL installation requires Git to be installed and available on the system path used by Unity.
 
 ## Changelog
 
