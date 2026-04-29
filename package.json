@@ -1,6 +1,6 @@
 {
   "name": "com.control-tools.required-attribute",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "displayName": "Control Tools - Required Attribute",
   "description": "Extended required field validation tools for Unity.",
   "unity": "6000.0",

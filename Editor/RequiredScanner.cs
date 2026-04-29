@@ -1,6 +1,7 @@
 ﻿#if UNITY_EDITOR && UNITY_6000_0_OR_NEWER
 using System;
 using System.Collections.Generic;
+using System.IO;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEditorInternal;
@@ -14,8 +15,13 @@ namespace Control.Tools.Required.Editor
     internal static class RequiredScanner
     {
         private static readonly List<RequiredIssue> issues = new List<RequiredIssue>();
+        private static readonly HashSet<string> queuedAssetPathsToScan = new HashSet<string>();
+        private static readonly HashSet<string> queuedAssetFoldersToScan = new HashSet<string>();
+        private static readonly HashSet<string> queuedAssetPathsToRemove = new HashSet<string>();
+        private static readonly HashSet<string> queuedAssetFoldersToRemove = new HashSet<string>();
         private static bool refreshQueued;
-        private static bool queuedRefreshIncludesAssets;
+        private static bool queuedSceneRefresh;
+        private static bool queuedFullAssetRefresh;
         private static double nextRefreshTime;
 
         public static event Action IssuesChanged;
@@ -112,14 +118,37 @@ namespace Control.Tools.Required.Editor
 
         public static void RequestRefresh(bool includeAssets)
         {
-            queuedRefreshIncludesAssets |= includeAssets;
-            nextRefreshTime = EditorApplication.timeSinceStartup + 0.2d;
-            if (!refreshQueued)
+            queuedSceneRefresh = true;
+            if (includeAssets)
             {
-                EditorApplication.update += RefreshWhenReady;
+                queuedFullAssetRefresh = true;
+                ClearTargetedAssetRefreshQueue();
             }
 
-            refreshQueued = true;
+            QueueRefresh();
+        }
+
+        public static void RequestAssetRefresh(
+            string[] importedAssets,
+            string[] deletedAssets,
+            string[] movedAssets,
+            string[] movedFromAssetPaths)
+        {
+            if (queuedFullAssetRefresh)
+            {
+                QueueRefresh();
+                return;
+            }
+
+            bool hasQueuedChanges = false;
+            hasQueuedChanges |= QueueImportedAssetPaths(importedAssets);
+            hasQueuedChanges |= QueueDeletedAssetPaths(deletedAssets);
+            hasQueuedChanges |= QueueMovedAssetPaths(movedAssets, movedFromAssetPaths);
+
+            if (hasQueuedChanges)
+            {
+                QueueRefresh();
+            }
         }
 
         public static void RefreshNow()
@@ -129,31 +158,14 @@ namespace Control.Tools.Required.Editor
 
         public static void RefreshNow(bool includeAssets)
         {
-            refreshQueued = false;
-            queuedRefreshIncludesAssets = false;
-            EditorApplication.update -= RefreshWhenReady;
+            ClearRefreshQueue();
             if (EditorApplication.isCompiling || EditorApplication.isUpdating)
             {
                 RequestRefresh(includeAssets);
                 return;
             }
 
-            List<RequiredIssue> preservedAssetIssues = includeAssets ? null : GetPreservedAssetIssues();
-            issues.Clear();
-            if (preservedAssetIssues != null)
-            {
-                issues.AddRange(preservedAssetIssues);
-            }
-
-            ScanLoadedScenes();
-            ScanPrefabStage();
-            if (includeAssets)
-            {
-                ScanAssets();
-            }
-
-            IssuesChanged?.Invoke();
-            InternalEditorUtility.RepaintAllViews();
+            Refresh(true, includeAssets, null, null, null, null);
         }
 
         private static void RefreshWhenReady()
@@ -163,11 +175,102 @@ namespace Control.Tools.Required.Editor
                 return;
             }
 
-            bool includeAssets = queuedRefreshIncludesAssets;
-            RefreshNow(includeAssets);
+            if (EditorApplication.isCompiling || EditorApplication.isUpdating)
+            {
+                nextRefreshTime = EditorApplication.timeSinceStartup + 0.5d;
+                return;
+            }
+
+            bool scanScenes = queuedSceneRefresh;
+            bool fullAssetRefresh = queuedFullAssetRefresh;
+            List<string> assetPathsToScan = new List<string>(queuedAssetPathsToScan);
+            List<string> assetFoldersToScan = new List<string>(queuedAssetFoldersToScan);
+            List<string> assetPathsToRemove = new List<string>(queuedAssetPathsToRemove);
+            List<string> assetFoldersToRemove = new List<string>(queuedAssetFoldersToRemove);
+
+            ClearRefreshQueue();
+            Refresh(
+                scanScenes,
+                fullAssetRefresh,
+                assetPathsToScan,
+                assetFoldersToScan,
+                assetPathsToRemove,
+                assetFoldersToRemove);
         }
 
-        private static List<RequiredIssue> GetPreservedAssetIssues()
+        private static void QueueRefresh()
+        {
+            nextRefreshTime = EditorApplication.timeSinceStartup + 0.2d;
+            if (!refreshQueued)
+            {
+                EditorApplication.update += RefreshWhenReady;
+            }
+
+            refreshQueued = true;
+        }
+
+        private static void ClearRefreshQueue()
+        {
+            refreshQueued = false;
+            queuedSceneRefresh = false;
+            queuedFullAssetRefresh = false;
+            ClearTargetedAssetRefreshQueue();
+            EditorApplication.update -= RefreshWhenReady;
+        }
+
+        private static void ClearTargetedAssetRefreshQueue()
+        {
+            queuedAssetPathsToScan.Clear();
+            queuedAssetFoldersToScan.Clear();
+            queuedAssetPathsToRemove.Clear();
+            queuedAssetFoldersToRemove.Clear();
+        }
+
+        private static void Refresh(
+            bool scanScenes,
+            bool fullAssetRefresh,
+            IReadOnlyCollection<string> assetPathsToScan,
+            IReadOnlyCollection<string> assetFoldersToScan,
+            IReadOnlyCollection<string> assetPathsToRemove,
+            IReadOnlyCollection<string> assetFoldersToRemove)
+        {
+            List<RequiredIssue> preservedIssues = GetPreservedIssues(
+                scanScenes,
+                fullAssetRefresh,
+                assetPathsToScan,
+                assetFoldersToScan,
+                assetPathsToRemove,
+                assetFoldersToRemove);
+
+            issues.Clear();
+            issues.AddRange(preservedIssues);
+
+            if (scanScenes)
+            {
+                ScanLoadedScenes();
+                ScanPrefabStage();
+            }
+
+            if (fullAssetRefresh)
+            {
+                ScanAssets();
+            }
+            else
+            {
+                ScanAssets(assetPathsToScan, assetFoldersToScan);
+            }
+
+            IssuesChanged?.Invoke();
+            InternalEditorUtility.RepaintAllViews();
+        }
+
+        private static List<RequiredIssue> GetPreservedIssues(
+            bool scanScenes,
+            bool fullAssetRefresh,
+            IReadOnlyCollection<string> assetPathsToScan,
+            IReadOnlyCollection<string> assetFoldersToScan,
+            IReadOnlyCollection<string> assetPathsToRemove,
+            IReadOnlyCollection<string> assetFoldersToRemove)
         {
             string prefabStagePath = GetCurrentPrefabStagePath();
             List<RequiredIssue> preserved = new List<RequiredIssue>();
@@ -176,10 +279,28 @@ namespace Control.Tools.Required.Editor
                 RequiredIssue issue = issues[i];
                 if (string.IsNullOrEmpty(issue.AssetPath))
                 {
+                    if (!scanScenes)
+                    {
+                        preserved.Add(issue);
+                    }
+
                     continue;
                 }
 
-                if (!string.IsNullOrEmpty(prefabStagePath) && issue.AssetPath == prefabStagePath)
+                if (fullAssetRefresh)
+                {
+                    continue;
+                }
+
+                if (scanScenes && !string.IsNullOrEmpty(prefabStagePath) && issue.AssetPath == prefabStagePath)
+                {
+                    continue;
+                }
+
+                if (ContainsPath(assetPathsToScan, issue.AssetPath)
+                    || ContainsPath(assetPathsToRemove, issue.AssetPath)
+                    || IsPathInAnyFolder(issue.AssetPath, assetFoldersToScan)
+                    || IsPathInAnyFolder(issue.AssetPath, assetFoldersToRemove))
                 {
                     continue;
                 }
@@ -231,6 +352,40 @@ namespace Control.Tools.Required.Editor
             ScanScriptableObjectAssets();
         }
 
+        private static void ScanAssets(IReadOnlyCollection<string> assetPaths, IReadOnlyCollection<string> assetFolders)
+        {
+            if ((assetPaths == null || assetPaths.Count == 0) && (assetFolders == null || assetFolders.Count == 0))
+            {
+                return;
+            }
+
+            HashSet<string> pathsToScan = new HashSet<string>();
+            if (assetPaths != null)
+            {
+                foreach (string assetPath in assetPaths)
+                {
+                    if (IsInspectableAssetPath(assetPath))
+                    {
+                        pathsToScan.Add(assetPath);
+                    }
+                }
+            }
+
+            if (assetFolders != null)
+            {
+                foreach (string folderPath in assetFolders)
+                {
+                    AddAssetsInFolder(pathsToScan, folderPath, "t:Prefab");
+                    AddAssetsInFolder(pathsToScan, folderPath, "t:ScriptableObject");
+                }
+            }
+
+            foreach (string assetPath in pathsToScan)
+            {
+                ScanAsset(assetPath);
+            }
+        }
+
         private static void ScanPrefabAssets()
         {
             string[] prefabGuids = AssetDatabase.FindAssets("t:Prefab");
@@ -258,6 +413,29 @@ namespace Control.Tools.Required.Editor
                     {
                         ScanObject(scriptableObject, scriptableObject, string.Empty, assetPath);
                     }
+                }
+            }
+        }
+
+        private static void ScanAsset(string assetPath)
+        {
+            if (string.IsNullOrEmpty(assetPath) || AssetDatabase.IsValidFolder(assetPath))
+            {
+                return;
+            }
+
+            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(assetPath);
+            if (prefab != null)
+            {
+                ScanGameObjectHierarchy(prefab, string.Empty, assetPath);
+            }
+
+            Object[] objects = AssetDatabase.LoadAllAssetsAtPath(assetPath);
+            for (int objectIndex = 0; objectIndex < objects.Length; objectIndex++)
+            {
+                if (objects[objectIndex] is ScriptableObject scriptableObject)
+                {
+                    ScanObject(scriptableObject, scriptableObject, string.Empty, assetPath);
                 }
             }
         }
@@ -355,6 +533,186 @@ namespace Control.Tools.Required.Editor
             }
 
             return ownerObject != null ? ownerObject.name : "Missing Object";
+        }
+
+        private static bool QueueImportedAssetPaths(string[] importedAssets)
+        {
+            bool hasQueuedChanges = false;
+            if (importedAssets == null)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < importedAssets.Length; i++)
+            {
+                string assetPath = importedAssets[i];
+                if (!IsInspectableAssetPath(assetPath) || AssetDatabase.IsValidFolder(assetPath))
+                {
+                    continue;
+                }
+
+                queuedAssetPathsToScan.Add(assetPath);
+                hasQueuedChanges = true;
+            }
+
+            return hasQueuedChanges;
+        }
+
+        private static bool QueueDeletedAssetPaths(string[] deletedAssets)
+        {
+            bool hasQueuedChanges = false;
+            if (deletedAssets == null)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < deletedAssets.Length; i++)
+            {
+                string assetPath = deletedAssets[i];
+                if (IsInspectableAssetPath(assetPath))
+                {
+                    queuedAssetPathsToRemove.Add(assetPath);
+                    hasQueuedChanges = true;
+                }
+                else if (IsLikelyFolderPath(assetPath))
+                {
+                    queuedAssetFoldersToRemove.Add(assetPath);
+                    hasQueuedChanges = true;
+                }
+            }
+
+            return hasQueuedChanges;
+        }
+
+        private static bool QueueMovedAssetPaths(string[] movedAssets, string[] movedFromAssetPaths)
+        {
+            bool hasQueuedChanges = false;
+            if (movedAssets == null)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < movedAssets.Length; i++)
+            {
+                string movedAssetPath = movedAssets[i];
+                string movedFromAssetPath = movedFromAssetPaths != null && i < movedFromAssetPaths.Length
+                    ? movedFromAssetPaths[i]
+                    : string.Empty;
+
+                if (AssetDatabase.IsValidFolder(movedAssetPath))
+                {
+                    queuedAssetFoldersToScan.Add(movedAssetPath);
+                    if (!string.IsNullOrEmpty(movedFromAssetPath))
+                    {
+                        queuedAssetFoldersToRemove.Add(movedFromAssetPath);
+                    }
+
+                    hasQueuedChanges = true;
+                    continue;
+                }
+
+                if (!IsInspectableAssetPath(movedAssetPath) && !IsInspectableAssetPath(movedFromAssetPath))
+                {
+                    continue;
+                }
+
+                if (IsInspectableAssetPath(movedAssetPath))
+                {
+                    queuedAssetPathsToScan.Add(movedAssetPath);
+                }
+
+                if (IsInspectableAssetPath(movedFromAssetPath))
+                {
+                    queuedAssetPathsToRemove.Add(movedFromAssetPath);
+                }
+
+                hasQueuedChanges = true;
+            }
+
+            return hasQueuedChanges;
+        }
+
+        private static void AddAssetsInFolder(HashSet<string> pathsToScan, string folderPath, string filter)
+        {
+            if (pathsToScan == null || string.IsNullOrEmpty(folderPath) || !AssetDatabase.IsValidFolder(folderPath))
+            {
+                return;
+            }
+
+            string[] guids = AssetDatabase.FindAssets(filter, new[] { folderPath });
+            for (int i = 0; i < guids.Length; i++)
+            {
+                string assetPath = AssetDatabase.GUIDToAssetPath(guids[i]);
+                if (IsInspectableAssetPath(assetPath))
+                {
+                    pathsToScan.Add(assetPath);
+                }
+            }
+        }
+
+        private static bool IsInspectableAssetPath(string assetPath)
+        {
+            if (string.IsNullOrEmpty(assetPath))
+            {
+                return false;
+            }
+
+            string extension = Path.GetExtension(assetPath);
+            return string.Equals(extension, ".prefab", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(extension, ".asset", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsLikelyFolderPath(string assetPath)
+        {
+            return !string.IsNullOrEmpty(assetPath) && string.IsNullOrEmpty(Path.GetExtension(assetPath));
+        }
+
+        private static bool ContainsPath(IReadOnlyCollection<string> paths, string assetPath)
+        {
+            if (paths == null)
+            {
+                return false;
+            }
+
+            foreach (string path in paths)
+            {
+                if (string.Equals(path, assetPath, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsPathInAnyFolder(string assetPath, IReadOnlyCollection<string> folderPaths)
+        {
+            if (string.IsNullOrEmpty(assetPath) || folderPaths == null)
+            {
+                return false;
+            }
+
+            foreach (string folderPath in folderPaths)
+            {
+                if (IsPathInFolder(assetPath, folderPath))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsPathInFolder(string assetPath, string folderPath)
+        {
+            if (string.IsNullOrEmpty(assetPath) || string.IsNullOrEmpty(folderPath))
+            {
+                return false;
+            }
+
+            string normalizedFolderPath = folderPath.TrimEnd('/');
+            return string.Equals(assetPath, normalizedFolderPath, StringComparison.Ordinal)
+                || assetPath.StartsWith(normalizedFolderPath + "/", StringComparison.Ordinal);
         }
     }
 }
