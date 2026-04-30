@@ -3,7 +3,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
-using UnityEditor.SceneManagement;
 using UnityEditorInternal;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -28,15 +27,8 @@ namespace Control.Tools.Required.Editor
 
         static RequiredScanner()
         {
-            EditorApplication.delayCall += () => RequestRefresh(true);
             EditorApplication.hierarchyChanged += () => RequestRefresh(false);
-            EditorSceneManager.sceneOpened += (_, __) => RequestRefresh(false);
-            EditorSceneManager.sceneClosed += _ => RequestRefresh(false);
-            EditorSceneManager.sceneSaved += _ => RequestRefresh(false);
-            EditorSceneManager.activeSceneChangedInEditMode += (_, __) => RequestRefresh(false);
             Undo.undoRedoPerformed += () => RequestRefresh(false);
-            PrefabStage.prefabStageOpened += _ => RequestRefresh(false);
-            PrefabStage.prefabStageClosing += _ => RequestRefresh(false);
         }
 
         public static IReadOnlyList<RequiredIssue> Issues => issues;
@@ -118,6 +110,11 @@ namespace Control.Tools.Required.Editor
 
         public static void RequestRefresh(bool includeAssets)
         {
+            if (IsRefreshBlocked())
+            {
+                return;
+            }
+
             queuedSceneRefresh = true;
             if (includeAssets)
             {
@@ -134,6 +131,11 @@ namespace Control.Tools.Required.Editor
             string[] movedAssets,
             string[] movedFromAssetPaths)
         {
+            if (IsRefreshBlocked())
+            {
+                return;
+            }
+
             if (queuedFullAssetRefresh)
             {
                 QueueRefresh();
@@ -159,6 +161,11 @@ namespace Control.Tools.Required.Editor
         public static void RefreshNow(bool includeAssets)
         {
             ClearRefreshQueue();
+            if (IsRefreshBlocked())
+            {
+                return;
+            }
+
             if (EditorApplication.isCompiling || EditorApplication.isUpdating)
             {
                 RequestRefresh(includeAssets);
@@ -172,6 +179,12 @@ namespace Control.Tools.Required.Editor
         {
             if (!refreshQueued || EditorApplication.timeSinceStartup < nextRefreshTime)
             {
+                return;
+            }
+
+            if (IsRefreshBlocked())
+            {
+                ClearRefreshQueue();
                 return;
             }
 
@@ -247,8 +260,7 @@ namespace Control.Tools.Required.Editor
 
             if (scanScenes)
             {
-                ScanLoadedScenes();
-                ScanPrefabStage();
+                ScanActiveScene();
             }
 
             if (fullAssetRefresh)
@@ -272,7 +284,6 @@ namespace Control.Tools.Required.Editor
             IReadOnlyCollection<string> assetPathsToRemove,
             IReadOnlyCollection<string> assetFoldersToRemove)
         {
-            string prefabStagePath = GetCurrentPrefabStagePath();
             List<RequiredIssue> preserved = new List<RequiredIssue>();
             for (int i = 0; i < issues.Count; i++)
             {
@@ -292,11 +303,6 @@ namespace Control.Tools.Required.Editor
                     continue;
                 }
 
-                if (scanScenes && !string.IsNullOrEmpty(prefabStagePath) && issue.AssetPath == prefabStagePath)
-                {
-                    continue;
-                }
-
                 if (ContainsPath(assetPathsToScan, issue.AssetPath)
                     || ContainsPath(assetPathsToRemove, issue.AssetPath)
                     || IsPathInAnyFolder(issue.AssetPath, assetFoldersToScan)
@@ -311,39 +317,19 @@ namespace Control.Tools.Required.Editor
             return preserved;
         }
 
-        private static string GetCurrentPrefabStagePath()
+        private static void ScanActiveScene()
         {
-            PrefabStage stage = PrefabStageUtility.GetCurrentPrefabStage();
-            return stage != null ? stage.assetPath : string.Empty;
-        }
-
-        private static void ScanLoadedScenes()
-        {
-            for (int i = 0; i < SceneManager.sceneCount; i++)
-            {
-                Scene scene = SceneManager.GetSceneAt(i);
-                if (!scene.isLoaded)
-                {
-                    continue;
-                }
-
-                GameObject[] roots = scene.GetRootGameObjects();
-                for (int rootIndex = 0; rootIndex < roots.Length; rootIndex++)
-                {
-                    ScanGameObjectHierarchy(roots[rootIndex], scene.name, null);
-                }
-            }
-        }
-
-        private static void ScanPrefabStage()
-        {
-            PrefabStage stage = PrefabStageUtility.GetCurrentPrefabStage();
-            if (stage == null || stage.prefabContentsRoot == null)
+            Scene scene = SceneManager.GetActiveScene();
+            if (!scene.IsValid() || !scene.isLoaded)
             {
                 return;
             }
 
-            ScanGameObjectHierarchy(stage.prefabContentsRoot, string.Empty, stage.assetPath);
+            GameObject[] roots = scene.GetRootGameObjects();
+            for (int rootIndex = 0; rootIndex < roots.Length; rootIndex++)
+            {
+                ScanGameObjectHierarchy(roots[rootIndex], scene.name, null);
+            }
         }
 
         private static void ScanAssets()
@@ -569,6 +555,12 @@ namespace Control.Tools.Required.Editor
             for (int i = 0; i < deletedAssets.Length; i++)
             {
                 string assetPath = deletedAssets[i];
+                if (!string.IsNullOrEmpty(assetPath))
+                {
+                    queuedSceneRefresh = true;
+                    hasQueuedChanges = true;
+                }
+
                 if (IsInspectableAssetPath(assetPath))
                 {
                     queuedAssetPathsToRemove.Add(assetPath);
@@ -582,6 +574,11 @@ namespace Control.Tools.Required.Editor
             }
 
             return hasQueuedChanges;
+        }
+
+        private static bool IsRefreshBlocked()
+        {
+            return EditorApplication.isPlayingOrWillChangePlaymode;
         }
 
         private static bool QueueMovedAssetPaths(string[] movedAssets, string[] movedFromAssetPaths)
