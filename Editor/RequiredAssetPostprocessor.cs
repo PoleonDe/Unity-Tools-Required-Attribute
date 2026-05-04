@@ -11,7 +11,7 @@ namespace Control.Tools.Required.Editor
             string[] movedAssets,
             string[] movedFromAssetPaths)
         {
-            RequiredScanner.RequestRefresh(true);
+            RequiredScanner.RequestAssetRefresh(importedAssets, deletedAssets, movedAssets, movedFromAssetPaths);
         }
     }
 }
