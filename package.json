@@ -1,12 +1,12 @@
 {
   "name": "com.control-tools.required-attribute",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "displayName": "Control Tools - Required Attribute",
   "description": "Extended required field validation tools for Unity.",
   "unity": "6000.0",
   "license": "MIT",
   "author": {
-    "name": "PoleonDe",
+    "name": "Control Tools",
     "url": "https://github.com/PoleonDe"
   },
   "documentationUrl": "https://github.com/PoleonDe/Unity-Tools-Required-Attribute#readme",
